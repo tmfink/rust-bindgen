@@ -10,6 +10,8 @@ use parse::{ClangItemParser, ParseError};
 /// An enum representing custom handling that can be given to a variant.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum EnumVariantCustomBehavior {
+    /// This variant will be a module containing constants.
+    ModuleConstify,
     /// This variant will be constified, that is, forced to generate a constant.
     Constify,
     /// This variant will be hidden entirely from the resulting enum.

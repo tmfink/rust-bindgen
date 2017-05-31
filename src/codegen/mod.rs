@@ -36,7 +36,7 @@ use std::mem;
 use std::ops;
 use syntax::abi;
 use syntax::ast;
-use syntax::codemap::{Span, respan};
+use syntax::codemap::{DUMMY_SP, Span, respan};
 use syntax::ptr::P;
 
 fn root_import_depth(ctx: &BindgenContext, item: &Item) -> usize {
@@ -244,7 +244,6 @@ impl ForeignModBuilder {
     }
 
     fn build(self, ctx: &BindgenContext) -> P<ast::Item> {
-        use syntax::codemap::DUMMY_SP;
         P(ast::Item {
             ident: ctx.rust_ident(""),
             id: ast::DUMMY_NODE_ID,
@@ -2001,6 +2000,10 @@ enum EnumBuilder<'a> {
         aster: P<ast::Item>,
     },
     Consts { aster: P<ast::Item> },
+    ModuleConsts {
+        module_name: &'a str,
+        module_items: Vec<P<ast::Item>>,
+    },
 }
 
 impl<'a> EnumBuilder<'a> {
@@ -2010,7 +2013,8 @@ impl<'a> EnumBuilder<'a> {
            name: &'a str,
            repr: P<ast::Ty>,
            bitfield_like: bool,
-           constify: bool)
+           constify: bool,
+           constify_module: bool)
            -> Self {
         if bitfield_like {
             EnumBuilder::Bitfield {
@@ -2022,8 +2026,19 @@ impl<'a> EnumBuilder<'a> {
                     .build(),
             }
         } else if constify {
-            EnumBuilder::Consts {
-                aster: aster.type_(name).build_ty(repr),
+            if constify_module {
+                let type_definition = aster::item::ItemBuilder::new()
+                    .pub_()
+                    .type_("Type")
+                    .build_ty(repr);
+                EnumBuilder::ModuleConsts {
+                    module_name: name,
+                    module_items: vec![type_definition],
+                }
+            } else  {
+                EnumBuilder::Consts {
+                    aster: aster.type_(name).build_ty(repr),
+                }
             }
         } else {
             EnumBuilder::Rust(aster.enum_(name))
@@ -2095,6 +2110,23 @@ impl<'a> EnumBuilder<'a> {
                 result.push(constant);
                 self
             }
+            EnumBuilder::ModuleConsts { module_name, module_items, .. } => {
+                let constant = aster::AstBuilder::new()
+                    .item()
+                    .pub_()
+                    .const_(&*variant_name)
+                    .expr()
+                    .build(expr)
+                    .build(rust_ty);
+
+                let mut module_items = module_items.clone();
+                module_items.push(constant);
+
+                EnumBuilder::ModuleConsts {
+                    module_name,
+                    module_items,
+                }
+            }
         }
     }
 
@@ -2160,6 +2192,22 @@ impl<'a> EnumBuilder<'a> {
                 aster
             }
             EnumBuilder::Consts { aster, .. } => aster,
+            EnumBuilder::ModuleConsts { module_items, module_name, .. } => {
+                // Create module item with type and variant definitions
+                let module_item = P(ast::Item {
+                    ident: ast::Ident::from_str(module_name),
+                    attrs: vec![],
+                    id: ast::DUMMY_NODE_ID,
+                    node: ast::ItemKind::Mod(ast::Mod {
+                        inner: DUMMY_SP,
+                        items: module_items,
+                    }),
+                    vis: ast::Visibility::Public,
+                    span: DUMMY_SP,
+                });
+
+                module_item
+            }
         }
     }
 }
@@ -2225,7 +2273,17 @@ impl CodeGenerator for Enum {
                 .any(|v| ctx.options().bitfield_enums.matches(&v.name())))
         };
 
-        let is_constified_enum = {
+        let is_constified_enum_module = {
+            ctx.options().constified_enum_modules.matches(&name) ||
+            (enum_ty.name().is_none() &&
+             self.variants()
+                .iter()
+                .any(|v| ctx.options().constified_enum_modules.matches(&v.name())))
+        };
+
+
+        let is_constified_enum =  {
+            is_constified_enum_module ||
             ctx.options().constified_enums.matches(&name) ||
             (enum_ty.name().is_none() &&
              self.variants()
@@ -2300,7 +2358,8 @@ impl CodeGenerator for Enum {
                                            &name,
                                            repr,
                                            is_bitfield,
-                                           is_constified_enum);
+                                           is_constified_enum,
+                                           is_constified_enum_module);
 
         // A map where we keep a value -> variant relation.
         let mut seen_values = HashMap::<_, String>::new();
