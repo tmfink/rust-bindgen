@@ -39,6 +39,9 @@ use syntax::ast;
 use syntax::codemap::{DUMMY_SP, Span, respan};
 use syntax::ptr::P;
 
+// Name of type defined in constified enum module
+static CONSTIFIED_ENUM_MODULE_REPR_NAME: &'static str = "Type";
+
 fn root_import_depth(ctx: &BindgenContext, item: &Item) -> usize {
     if !ctx.options().enable_cxx_namespaces {
         return 0;
@@ -2029,8 +2032,9 @@ impl<'a> EnumBuilder<'a> {
             if constify_module {
                 let type_definition = aster::item::ItemBuilder::new()
                     .pub_()
-                    .type_("Type")
+                    .type_(CONSTIFIED_ENUM_MODULE_REPR_NAME)
                     .build_ty(repr);
+
                 EnumBuilder::ModuleConsts {
                     module_name: name,
                     module_items: vec![type_definition],
@@ -2111,13 +2115,17 @@ impl<'a> EnumBuilder<'a> {
                 self
             }
             EnumBuilder::ModuleConsts { module_name, module_items, .. } => {
+                // Variant type
+                let inside_module_type =
+                    aster::AstBuilder::new().ty().id(CONSTIFIED_ENUM_MODULE_REPR_NAME);
+
                 let constant = aster::AstBuilder::new()
                     .item()
                     .pub_()
                     .const_(&*variant_name)
                     .expr()
                     .build(expr)
-                    .build(rust_ty);
+                    .build(inside_module_type.clone());
 
                 let mut module_items = module_items.clone();
                 module_items.push(constant);
