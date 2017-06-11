@@ -40,7 +40,7 @@ use syntax::codemap::{DUMMY_SP, Span, respan};
 use syntax::ptr::P;
 
 // Name of type defined in constified enum module
-static CONSTIFIED_ENUM_MODULE_REPR_NAME: &'static str = "Type";
+pub static CONSTIFIED_ENUM_MODULE_REPR_NAME: &'static str = "Type";
 
 fn root_import_depth(ctx: &BindgenContext, item: &Item) -> usize {
     if !ctx.options().enable_cxx_namespaces {
@@ -2281,14 +2281,7 @@ impl CodeGenerator for Enum {
                 .any(|v| ctx.options().bitfield_enums.matches(&v.name())))
         };
 
-        let is_constified_enum_module = {
-            ctx.options().constified_enum_modules.matches(&name) ||
-            (enum_ty.name().is_none() &&
-             self.variants()
-                .iter()
-                .any(|v| ctx.options().constified_enum_modules.matches(&v.name())))
-        };
-
+        let is_constified_enum_module = self.is_constified_enum_module(ctx, item);
 
         let is_constified_enum =  {
             is_constified_enum_module ||

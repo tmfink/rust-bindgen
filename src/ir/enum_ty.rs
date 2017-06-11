@@ -5,6 +5,7 @@ use super::item::Item;
 use super::ty::TypeKind;
 use clang;
 use ir::annotations::Annotations;
+use ir::item::ItemCanonicalName;
 use parse::{ClangItemParser, ParseError};
 
 /// An enum representing custom handling that can be given to a variant.
@@ -122,6 +123,18 @@ impl Enum {
             CXChildVisit_Continue
         });
         Ok(Enum::new(repr, variants))
+    }
+
+    // Whether the enum should be an constified enum module
+    pub fn is_constified_enum_module(&self, ctx: &BindgenContext, item: &Item) -> bool {
+        let name = item.canonical_name(ctx);
+        let enum_ty = item.expect_type();
+
+        ctx.options().constified_enum_modules.matches(&name) ||
+        (enum_ty.name().is_none() &&
+            self.variants()
+            .iter()
+            .any(|v| ctx.options().constified_enum_modules.matches(&v.name())))
     }
 }
 
