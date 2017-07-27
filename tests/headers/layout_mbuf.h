@@ -1,3 +1,5 @@
+// bindgen-flags: --rust-target 1.0
+
 
 #define RTE_CACHE_LINE_MIN_SIZE 64	/**< Minimum Cache line size. */
 

@@ -1,4 +1,5 @@
-// bindgen-flags: -- -std=c++11
+// bindgen-flags: --rust-target 1.0 -- -std=c++11
+
 
 class A {
     unsigned c;

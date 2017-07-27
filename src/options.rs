@@ -1,4 +1,4 @@
-use bindgen::{Builder, CodegenConfig, builder};
+use bindgen::{Builder, CodegenConfig, RustTarget, builder};
 use clap::{App, Arg};
 use std::fs::File;
 use std::io::{self, Error, ErrorKind};
@@ -166,6 +166,10 @@ pub fn builder_from_flags<I>
                 .takes_value(true)
                 .multiple(true)
                 .number_of_values(1),
+            Arg::with_name("rust-target")
+                .long("rust-target")
+                .help("Version of the Rust compiler to target.")
+                .takes_value(true),
             Arg::with_name("static")
                 .long("static-link")
                 .help("Link to static library.")
@@ -229,6 +233,10 @@ pub fn builder_from_flags<I>
         builder = builder.header(header);
     } else {
         return Err(Error::new(ErrorKind::Other, "Header not found"));
+    }
+
+    if let Some(rust_target) = matches.value_of("rust-target") {
+        builder = builder.rust_target(RustTarget::from_str(rust_target)?);
     }
 
     if let Some(bitfields) = matches.values_of("bitfield-enum") {
@@ -343,10 +351,6 @@ pub fn builder_from_flags<I>
 
     if matches.is_present("ignore-methods") {
         builder = builder.ignore_methods();
-    }
-
-    if matches.is_present("unstable-rust") {
-        builder = builder.unstable_rust(true);
     }
 
     if matches.is_present("no-convert-floats") {

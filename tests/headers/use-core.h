@@ -1,4 +1,4 @@
-// bindgen-flags: --use-core --raw-line "extern crate core;"
+// bindgen-flags: --rust-target 1.0 --use-core --raw-line "extern crate core;"
 
 struct foo {
   int a, b;

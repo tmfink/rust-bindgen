@@ -1,3 +1,5 @@
+// bindgen-flags: --rust-target 1.0
+
 struct foo {
     unsigned int a;
     union {

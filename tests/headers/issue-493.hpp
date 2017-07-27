@@ -1,3 +1,5 @@
+// bindgen-flags: --rust-target 1.0
+
 template<class _CharT, class _Traits, class _Allocator>
 class basic_string
 {

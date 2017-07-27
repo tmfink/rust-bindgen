@@ -355,7 +355,7 @@ impl CodeGenerator for Module {
             }
 
             if item.id() == ctx.root_module() {
-                if result.saw_union && !ctx.options().unstable_rust {
+                if result.saw_union && !ctx.options().rust_features().untagged_union() {
                     utils::prepend_union_types(ctx, &mut *result);
                 }
                 if result.saw_incomplete_array {
@@ -914,8 +914,8 @@ impl<'a> FieldCodegen<'a> for FieldData {
         let field_ty = ctx.resolve_type(self.ty());
         let ty = self.ty().to_rust_ty_or_opaque(ctx, &());
 
-        // NB: In unstable rust we use proper `union` types.
-        let ty = if parent.is_union() && !ctx.options().unstable_rust {
+        // NB: If supported, we use proper `union` types.
+        let ty = if parent.is_union() && !ctx.options().rust_features().untagged_union() {
             if ctx.options().enable_cxx_namespaces {
                 quote_ty!(ctx.ext_cx(), root::__BindgenUnionField<$ty>)
             } else {
@@ -1055,8 +1055,8 @@ impl BitfieldUnit {
                          -> P<ast::Item> {
         let ctor_name = self.ctor_name(ctx);
 
-        // If we're generating unstable Rust, add the const.
-        let fn_prefix = if ctx.options().unstable_rust {
+        // If supported, add the const.
+        let fn_prefix = if ctx.options().rust_features().const_fn() {
             quote_tokens!(ctx.ext_cx(), pub const fn)
         } else {
             quote_tokens!(ctx.ext_cx(), pub fn)
@@ -1118,8 +1118,8 @@ impl Bitfield {
         let offset = self.offset_into_unit();
         let mask = self.mask();
 
-        // If we're generating unstable Rust, add the const.
-        let fn_prefix = if ctx.options().unstable_rust {
+        // If supported, add the const.
+        let fn_prefix = if ctx.options().rust_features().const_fn() {
             quote_tokens!(ctx.ext_cx(), pub const fn)
         } else {
             quote_tokens!(ctx.ext_cx(), pub fn)
@@ -1448,7 +1448,7 @@ impl CodeGenerator for CompInfo {
         }
 
         let canonical_name = item.canonical_name(ctx);
-        let builder = if is_union && ctx.options().unstable_rust {
+        let builder = if is_union && ctx.options().rust_features().untagged_union() {
             aster::AstBuilder::new()
                 .item()
                 .pub_()
@@ -1555,7 +1555,7 @@ impl CodeGenerator for CompInfo {
                           ());
         }
 
-        if is_union && !ctx.options().unstable_rust {
+        if is_union && !ctx.options().rust_features().untagged_union() {
             let layout = layout.expect("Unable to get layout information?");
             let ty = BlobTyBuilder::new(layout).build();
             let field = StructFieldBuilder::named("bindgen_union_field")

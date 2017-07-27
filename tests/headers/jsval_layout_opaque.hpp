@@ -1,4 +1,4 @@
-// bindgen-flags: -- -std=c++11
+// bindgen-flags: --rust-target 1.0 -- -std=c++11
 
 /**
  * These typedefs are hacky, but keep our tests consistent across 64-bit

@@ -1,3 +1,5 @@
+// bindgen-flags: --rust-target 1.0
+
 union WithBigArray {
   int a;
   int b[33];

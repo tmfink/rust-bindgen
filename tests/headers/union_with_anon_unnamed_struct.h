@@ -1,3 +1,5 @@
+// bindgen-flags: --rust-target 1.0
+
 union pixel {
     unsigned int rgba;
     struct {
