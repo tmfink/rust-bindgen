@@ -1,4 +1,54 @@
-//! Fix-point analyses on the IR using the monotone framework.
+//! Fix-point analyses on the IR using the "monotone framework".
+//!
+//! A lattice is a set with a partial ordering between elements, where there is
+//! a single least upper bound and a single greatest least bound for every
+//! subset. We are dealing with finite lattices, which means that it has a
+//! finite number of elements, and it follows that there exists a single top and
+//! a single bottom member of the lattice. For example, the power set of a
+//! finite set forms a finite lattice where partial ordering is defined by set
+//! inclusion, that is `a <= b` if `a` is a subset of `b`. Here is the finite
+//! lattice constructed from the set {0,1,2}:
+//!
+//! ```text
+//!                    .----- Top = {0,1,2} -----.
+//!                   /            |              \
+//!                  /             |               \
+//!                 /              |                \
+//!              {0,1} -------.  {0,2}  .--------- {1,2}
+//!                |           \ /   \ /             |
+//!                |            /     \              |
+//!                |           / \   / \             |
+//!               {0} --------'   {1}   `---------- {2}
+//!                 \              |                /
+//!                  \             |               /
+//!                   \            |              /
+//!                    `------ Bottom = {} ------'
+//! ```
+//!
+//! A monotone function `f` is a function where if `x <= y`, then it holds that
+//! `f(x) <= f(y)`. It should be clear that running a monotone function to a
+//! fix-point on a finite lattice will always terminate: `f` can only "move"
+//! along the lattice in a single direction, and therefore can only either find
+//! a fix-point in the middle of the lattice or continue to the top or bottom
+//! depending if it is ascending or descending the lattice respectively.
+//!
+//! For a deeper introduction to the general form of this kind of analysis, see
+//! [Static Program Analysis by Anders Møller and Michael I. Schwartzbach][spa].
+//!
+//! [spa]: https://cs.au.dk/~amoeller/spa/spa.pdf
+
+// Re-export individual analyses.
+mod template_params;
+pub use self::template_params::UsedTemplateParameters;
+mod derive_debug;
+pub use self::derive_debug::CannotDeriveDebug;
+mod has_vtable;
+pub use self::has_vtable::HasVtableAnalysis;
+pub use self::has_vtable::HasVtable;
+
+use ir::context::{BindgenContext, ItemId};
+use ir::traversal::{EdgeKind, Trace};
+use std::collections::HashMap;
 use std::fmt;
 
 /// An analysis in the monotone framework.
@@ -45,10 +95,10 @@ pub trait MonotoneFramework: Sized + fmt::Debug {
     ///
     /// If this results in changing our internal state (ie, we discovered that
     /// we have not reached a fix-point and iteration should continue), return
-    /// `true`. Otherwise, return `false`. When `constrain` returns false for
-    /// all nodes in the set, we have reached a fix-point and the analysis is
-    /// complete.
-    fn constrain(&mut self, node: Self::Node) -> bool;
+    /// `ConstrainResult::Changed`. Otherwise, return `ConstrainResult::Same`.
+    /// When `constrain` returns `ConstrainResult::Same` for all nodes in the
+    /// set, we have reached a fix-point and the analysis is complete.
+    fn constrain(&mut self, node: Self::Node) -> ConstrainResult;
 
     /// For each node `d` that depends on the given `node`'s current answer when
     /// running `constrain(d)`, call `f(d)`. This informs us which new nodes to
@@ -56,6 +106,17 @@ pub trait MonotoneFramework: Sized + fmt::Debug {
     /// information.
     fn each_depending_on<F>(&self, node: Self::Node, f: F)
         where F: FnMut(Self::Node);
+}
+
+/// Whether an analysis's `constrain` function modified the incremental results
+/// or not.
+pub enum ConstrainResult {
+    /// The incremental results were updated, and the fix-point computation
+    /// should continue.
+    Changed,
+
+    /// The incremental results were not updated.
+    Same,
 }
 
 /// Run an analysis in the monotone framework.
@@ -66,7 +127,7 @@ pub fn analyze<Analysis>(extra: Analysis::Extra) -> Analysis::Output
     let mut worklist = analysis.initial_worklist();
 
     while let Some(node) = worklist.pop() {
-        if analysis.constrain(node) {
+        if let ConstrainResult::Changed = analysis.constrain(node) {
             analysis.each_depending_on(node, |needs_work| {
                 worklist.push(needs_work);
             });
@@ -74,6 +135,30 @@ pub fn analyze<Analysis>(extra: Analysis::Extra) -> Analysis::Output
     }
 
     analysis.into()
+}
+
+/// Generate the dependency map for analysis
+pub fn generate_dependencies<F>(ctx: &BindgenContext, consider_edge: F) -> HashMap<ItemId, Vec<ItemId>>
+    where F: Fn(EdgeKind) -> bool {
+    let mut dependencies = HashMap::new();
+
+    for &item in ctx.whitelisted_items() {
+        dependencies.entry(item).or_insert(vec![]);
+
+        {
+            // We reverse our natural IR graph edges to find dependencies
+            // between nodes.
+            item.trace(ctx, &mut |sub_item: ItemId, edge_kind| {
+                if ctx.whitelisted_items().contains(&sub_item) &&
+                    consider_edge(edge_kind) {
+                        dependencies.entry(sub_item)
+                            .or_insert(vec![])
+                            .push(item);
+                    }
+            }, &());
+        }
+    }
+    dependencies
 }
 
 #[cfg(test)]
@@ -183,7 +268,7 @@ mod tests {
             self.graph.0.keys().cloned().collect()
         }
 
-        fn constrain(&mut self, node: Node) -> bool {
+        fn constrain(&mut self, node: Node) -> ConstrainResult {
             // The set of nodes reachable from a node `x` is
             //
             //     reachable(x) = s_0 U s_1 U ... U reachable(s_0) U reachable(s_1) U ...
@@ -210,7 +295,11 @@ mod tests {
             }
 
             let new_size = self.reachable[&node].len();
-            original_size != new_size
+            if original_size != new_size {
+                ConstrainResult::Changed
+            } else {
+                ConstrainResult::Same
+            }
         }
 
         fn each_depending_on<F>(&self, node: Node, mut f: F)

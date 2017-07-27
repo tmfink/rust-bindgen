@@ -11,6 +11,7 @@ pub const ENUM_VARIANT_2: _bindgen_ty_1 = _bindgen_ty_1::ENUM_VARIANT_2;
 pub enum _bindgen_ty_1 { ENUM_VARIANT_1 = 0, ENUM_VARIANT_2 = 1, }
 pub type JS_Alias = u8;
 #[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct JS_Base {
     pub f: JS_Alias,
 }
@@ -18,6 +19,7 @@ impl Default for JS_Base {
     fn default() -> Self { unsafe { ::std::mem::zeroed() } }
 }
 #[repr(C)]
+#[derive(Debug, Copy)]
 pub struct JS_AutoIdVector {
     pub _base: JS_Base,
 }
@@ -28,11 +30,14 @@ fn bindgen_test_layout_JS_AutoIdVector() {
     assert_eq! (::std::mem::align_of::<JS_AutoIdVector>() , 1usize , concat !
                 ( "Alignment of " , stringify ! ( JS_AutoIdVector ) ));
 }
+impl Clone for JS_AutoIdVector {
+    fn clone(&self) -> Self { *self }
+}
 impl Default for JS_AutoIdVector {
     fn default() -> Self { unsafe { ::std::mem::zeroed() } }
 }
 #[test]
-fn __bindgen_test_layout_JS_Base_instantiation() {
+fn __bindgen_test_layout_JS_Base_open0_int_close0_instantiation() {
     assert_eq!(::std::mem::size_of::<JS_Base>() , 1usize , concat ! (
                "Size of template specialization: " , stringify ! ( JS_Base )
                ));

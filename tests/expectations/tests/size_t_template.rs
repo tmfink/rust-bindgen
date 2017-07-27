@@ -5,6 +5,7 @@
 
 
 #[repr(C)]
+#[derive(Debug, Default, Copy)]
 pub struct C {
     pub arr: [u32; 3usize],
 }
@@ -20,15 +21,6 @@ fn bindgen_test_layout_C() {
                 "Alignment of field: " , stringify ! ( C ) , "::" , stringify
                 ! ( arr ) ));
 }
-impl Default for C {
-    fn default() -> Self { unsafe { ::std::mem::zeroed() } }
-}
-#[test]
-fn __bindgen_test_layout_Array_instantiation() {
-    assert_eq!(::std::mem::size_of::<[u32; 3usize]>() , 12usize , concat ! (
-               "Size of template specialization: " , stringify ! (
-               [u32; 3usize] ) ));
-    assert_eq!(::std::mem::align_of::<[u32; 3usize]>() , 4usize , concat ! (
-               "Alignment of template specialization: " , stringify ! (
-               [u32; 3usize] ) ));
+impl Clone for C {
+    fn clone(&self) -> Self { *self }
 }

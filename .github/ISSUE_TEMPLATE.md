@@ -1,3 +1,5 @@
+<!-- Thanks for filing a bindgen issue! We appreciate it :-) -->
+
 ### Input C/C++ Header
 
 ```C++
@@ -12,7 +14,7 @@
 // Use the `--dump-preprocessed-input` flag or the
 // `bindgen::Builder::dump_preprocessed_input` method to make your test case
 // standalone and without `#include`s, and then use C-Reduce to minimize it:
-// https://github.com/servo/rust-bindgen/blob/master/CONTRIBUTING.md#using-creduce-to-minimize-test-cases
+// https://github.com/rust-lang-nursery/rust-bindgen/blob/master/CONTRIBUTING.md#using-creduce-to-minimize-test-cases
 ```
 
 ### Bindgen Invocation
@@ -57,14 +59,3 @@ Replace this with a description of what you expected instead of the actual
 results. The more precise, the better! For example, if a struct in the generated
 bindings is missing a field that exists in the C/C++ struct, note that here.
 -->
-
-### `RUST_LOG=bindgen` Output
-
-<details>
-
-```
-Insert debug logging when running bindgen (not when compiling bindgen's output)
-with the `RUST_LOG=bindgen` environment variable set.
-```
-
-</details>

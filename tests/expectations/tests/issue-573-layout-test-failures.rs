@@ -5,11 +5,15 @@
 
 
 #[repr(C)]
-#[derive(Default)]
+#[derive(Debug, Copy, Clone)]
 pub struct Outer {
     pub i: u8,
 }
+impl Default for Outer {
+    fn default() -> Self { unsafe { ::std::mem::zeroed() } }
+}
 #[repr(C)]
+#[derive(Debug, Copy)]
 pub struct AutoIdVector {
     pub ar: Outer,
 }
@@ -25,11 +29,14 @@ fn bindgen_test_layout_AutoIdVector() {
                 "Alignment of field: " , stringify ! ( AutoIdVector ) , "::" ,
                 stringify ! ( ar ) ));
 }
+impl Clone for AutoIdVector {
+    fn clone(&self) -> Self { *self }
+}
 impl Default for AutoIdVector {
     fn default() -> Self { unsafe { ::std::mem::zeroed() } }
 }
 #[test]
-fn __bindgen_test_layout_Outer_instantiation() {
+fn __bindgen_test_layout_Outer_open0_int_close0_instantiation() {
     assert_eq!(::std::mem::size_of::<Outer>() , 1usize , concat ! (
                "Size of template specialization: " , stringify ! ( Outer ) ));
     assert_eq!(::std::mem::align_of::<Outer>() , 1usize , concat ! (

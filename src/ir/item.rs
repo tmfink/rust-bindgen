@@ -3,16 +3,18 @@
 use super::super::codegen::CONSTIFIED_ENUM_MODULE_REPR_NAME;
 use super::annotations::Annotations;
 use super::comment;
+use super::comp::MethodKind;
 use super::context::{BindgenContext, ItemId, PartialType};
 use super::derive::{CanDeriveCopy, CanDeriveDebug, CanDeriveDefault};
 use super::dot::DotAttributes;
-use super::function::Function;
+use super::function::{Function, FunctionKind};
 use super::item_kind::ItemKind;
 use super::layout::Opaque;
 use super::module::Module;
 use super::template::{AsTemplateParam, TemplateParameters};
 use super::traversal::{EdgeKind, Trace, Tracer};
 use super::ty::{Type, TypeKind};
+use super::analysis::HasVtable;
 use clang;
 use clang_sys;
 use parse::{ClangItemParser, ClangSubItemParser, ParseError, ParseResult};
@@ -272,32 +274,11 @@ impl CanDeriveDebug for Item {
     type Extra = ();
 
     fn can_derive_debug(&self, ctx: &BindgenContext, _: ()) -> bool {
-        if self.detect_derive_debug_cycle.get() {
-            return true;
-        }
-
-        self.detect_derive_debug_cycle.set(true);
-
-        let result = ctx.options().derive_debug &&
-                     match self.kind {
-            ItemKind::Type(ref ty) => {
-                if self.is_opaque(ctx, &()) {
-                    ty.layout(ctx)
-                        .map_or(true, |l| l.opaque().can_derive_debug(ctx, ()))
-                } else {
-                    ty.can_derive_debug(ctx, ())
-                }
-            }
-            _ => false,
-        };
-
-        self.detect_derive_debug_cycle.set(false);
-
-        result
+        ctx.options().derive_debug && ctx.lookup_item_id_can_derive_debug(self.id())
     }
 }
 
-impl CanDeriveDefault for Item {
+impl<'a> CanDeriveDefault<'a> for Item {
     type Extra = ();
 
     fn can_derive_default(&self, ctx: &BindgenContext, _: ()) -> bool {
@@ -309,7 +290,7 @@ impl CanDeriveDefault for Item {
                         .map_or(false,
                                 |l| l.opaque().can_derive_default(ctx, ()))
                 } else {
-                    ty.can_derive_default(ctx, ())
+                    ty.can_derive_default(ctx, self)
                 }
             }
             _ => false,
@@ -681,6 +662,33 @@ impl Item {
         }
     }
 
+    /// Create a fully disambiguated name for an item, including template
+    /// parameters if it is a type
+    pub fn full_disambiguated_name(&self, ctx: &BindgenContext) -> String {
+        let mut s = String::new();
+        let level = 0;
+        self.push_disambiguated_name(ctx, &mut s, level);
+        s
+    }
+
+    /// Helper function for full_disambiguated_name
+    fn push_disambiguated_name(&self, ctx: &BindgenContext, to: &mut String, level: u8) {
+        to.push_str(&self.canonical_name(ctx));
+        if let ItemKind::Type(ref ty) = *self.kind() {
+            if let TypeKind::TemplateInstantiation(ref inst) = *ty.kind() {
+                to.push_str(&format!("_open{}_", level));
+                for arg in inst.template_arguments() {
+                    arg.into_resolver()
+                       .through_type_refs()
+                       .resolve(ctx)
+                       .push_disambiguated_name(ctx, to, level + 1);
+                    to.push_str("_");
+                }
+                to.push_str(&format!("close{}", level));
+            }
+        }
+    }
+
     /// Get this function item's name, or `None` if this item is not a function.
     fn func_name(&self) -> Option<&str> {
         match *self.kind() {
@@ -895,6 +903,27 @@ impl Item {
             _ => false,
         }
     }
+
+    /// Is this item of a kind that is enabled for code generation?
+    pub fn is_enabled_for_codegen(&self, ctx: &BindgenContext) -> bool {
+        let cc = &ctx.options().codegen_config;
+        match *self.kind() {
+            ItemKind::Module(..) => true,
+            ItemKind::Var(_) => cc.vars,
+            ItemKind::Type(_) => cc.types,
+            ItemKind::Function(ref f) => {
+                match f.kind() {
+                    FunctionKind::Function => cc.functions,
+                    FunctionKind::Method(MethodKind::Constructor) => cc.constructors,
+                    FunctionKind::Method(MethodKind::Destructor) |
+                    FunctionKind::Method(MethodKind::VirtualDestructor) => cc.destructors,
+                    FunctionKind::Method(MethodKind::Static) |
+                    FunctionKind::Method(MethodKind::Normal) |
+                    FunctionKind::Method(MethodKind::Virtual) => cc.methods,
+                }
+            }
+        }
+    }
 }
 
 impl IsOpaque for ItemId {
@@ -916,6 +945,22 @@ impl IsOpaque for Item {
         self.annotations.opaque() ||
             self.as_type().map_or(false, |ty| ty.is_opaque(ctx, self)) ||
             ctx.opaque_by_name(&self.canonical_path(ctx))
+    }
+}
+
+impl HasVtable for ItemId {
+    type Extra = ();
+
+    fn has_vtable(&self, ctx: &BindgenContext, _: &()) -> bool {
+        ctx.lookup_item_id_has_vtable(self)
+    }
+}
+
+impl HasVtable for Item {
+    type Extra = ();
+
+    fn has_vtable(&self, ctx: &BindgenContext, _: &()) -> bool {
+        ctx.lookup_item_id_has_vtable(&self.id())
     }
 }
 

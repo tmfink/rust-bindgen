@@ -23,6 +23,23 @@ pub trait CanDeriveDebug {
                         -> bool;
 }
 
+/// A trait that encapsulates the logic for whether or not we can derive `Debug`.
+/// The difference between this trait and the CanDeriveDebug is that the type
+/// implementing this trait cannot use recursion or lookup result from fix point
+/// analysis. It's a helper trait for fix point analysis.
+pub trait CanTriviallyDeriveDebug {
+
+    /// Serve the same purpose as the Extra in CanDeriveDebug.
+    type Extra;
+
+    /// Return `true` if `Debug` can be derived for this thing, `false`
+    /// otherwise.
+    fn can_trivially_derive_debug(&self,
+                        ctx: &BindgenContext,
+                        extra: Self::Extra)
+                        -> bool;
+}
+
 /// A trait that encapsulates the logic for whether or not we can derive `Copy`
 /// for a given thing.
 pub trait CanDeriveCopy<'a> {
@@ -73,7 +90,7 @@ pub trait CanDeriveCopy<'a> {
 /// to be a recursive method that checks whether all the proper members can
 /// derive default or not, because of the limit rust has on 32 items as max in the
 /// array.
-pub trait CanDeriveDefault {
+pub trait CanDeriveDefault<'a> {
     /// Implementations can define this type to get access to any extra
     /// information required to determine whether they can derive `Default`. If
     /// extra information is unneeded, then this should simply be the unit type.

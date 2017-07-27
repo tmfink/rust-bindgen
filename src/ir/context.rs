@@ -5,8 +5,7 @@ use super::int::IntKind;
 use super::item::{IsOpaque, Item, ItemAncestors, ItemCanonicalPath, ItemSet};
 use super::item_kind::ItemKind;
 use super::module::{Module, ModuleKind};
-use super::named::UsedTemplateParameters;
-use super::analysis::analyze;
+use super::analysis::{analyze, UsedTemplateParameters, CannotDeriveDebug, HasVtableAnalysis};
 use super::template::{TemplateInstantiation, TemplateParameters};
 use super::traversal::{self, Edge, ItemTraversal};
 use super::ty::{FloatKind, Type, TypeKind};
@@ -18,7 +17,7 @@ use clang_sys;
 use parse::ClangItemParser;
 use std::borrow::Cow;
 use std::cell::Cell;
-use std::collections::{HashMap, hash_map};
+use std::collections::{HashMap, hash_map, HashSet};
 use std::collections::btree_map::{self, BTreeMap};
 use std::fmt;
 use std::iter::IntoIterator;
@@ -48,7 +47,7 @@ impl CanDeriveDebug for ItemId {
     }
 }
 
-impl CanDeriveDefault for ItemId {
+impl<'a> CanDeriveDefault<'a> for ItemId {
     type Extra = ();
 
     fn can_derive_default(&self, ctx: &BindgenContext, _: ()) -> bool {
@@ -158,6 +157,16 @@ pub struct BindgenContext<'ctx> {
     /// Whether a bindgen complex was generated
     generated_bindegen_complex: Cell<bool>,
 
+    /// The set of `ItemId`s that are whitelisted. This the very first thing
+    /// computed after parsing our IR, and before running any of our analyses.
+    whitelisted: Option<ItemSet>,
+
+    /// The set of `ItemId`s that are whitelisted for code generation _and_ that
+    /// we should generate accounting for the codegen options.
+    ///
+    /// It's computed right after computing the whitelisted items.
+    codegen_items: Option<ItemSet>,
+
     /// Map from an item's id to the set of template parameter items that it
     /// uses. See `ir::named` for more details. Always `Some` during the codegen
     /// phase.
@@ -169,10 +178,22 @@ pub struct BindgenContext<'ctx> {
 
     /// Whether we need the mangling hack which removes the prefixing underscore.
     needs_mangling_hack: bool,
+
+    /// The set of (`ItemId`s of) types that can't derive debug.
+    ///
+    /// This is populated when we enter codegen by `compute_can_derive_debug`
+    /// and is always `None` before that and `Some` after.
+    cant_derive_debug: Option<HashSet<ItemId>>,
+
+    /// The set of (`ItemId's of`) types that has vtable.
+    ///
+    /// Populated when we enter codegen by `compute_has_vtable`; always `None`
+    /// before that and `Some` after.
+    have_vtable: Option<HashSet<ItemId>>,
 }
 
 /// A traversal of whitelisted items.
-pub struct WhitelistedItems<'ctx, 'gen>
+struct WhitelistedItemsTraversal<'ctx, 'gen>
     where 'gen: 'ctx
 {
     ctx: &'ctx BindgenContext<'gen>,
@@ -180,10 +201,10 @@ pub struct WhitelistedItems<'ctx, 'gen>
                              'gen,
                              ItemSet,
                              Vec<ItemId>,
-                             fn(Edge) -> bool>,
+                             for<'a> fn(&'a BindgenContext, Edge) -> bool>,
 }
 
-impl<'ctx, 'gen> Iterator for WhitelistedItems<'ctx, 'gen>
+impl<'ctx, 'gen> Iterator for WhitelistedItemsTraversal<'ctx, 'gen>
     where 'gen: 'ctx
 {
     type Item = ItemId;
@@ -199,26 +220,23 @@ impl<'ctx, 'gen> Iterator for WhitelistedItems<'ctx, 'gen>
     }
 }
 
-impl<'ctx, 'gen> WhitelistedItems<'ctx, 'gen>
+impl<'ctx, 'gen> WhitelistedItemsTraversal<'ctx, 'gen>
     where 'gen: 'ctx
 {
     /// Construct a new whitelisted items traversal.
     pub fn new<R>(ctx: &'ctx BindgenContext<'gen>,
-                  roots: R)
-                  -> WhitelistedItems<'ctx, 'gen>
+                  roots: R,
+                  predicate: for<'a> fn(&'a BindgenContext, Edge) -> bool)
+                  -> Self
         where R: IntoIterator<Item = ItemId>,
     {
-        let predicate = if ctx.options().whitelist_recursively {
-            traversal::all_edges
-        } else {
-            traversal::no_edges
-        };
-        WhitelistedItems {
+        WhitelistedItemsTraversal {
             ctx: ctx,
             traversal: ItemTraversal::new(ctx, roots, predicate)
         }
     }
 }
+
 impl<'ctx> BindgenContext<'ctx> {
     /// Construct the context for the given `options`.
     pub fn new(options: BindgenOptions) -> Self {
@@ -292,9 +310,13 @@ impl<'ctx> BindgenContext<'ctx> {
             translation_unit: translation_unit,
             options: options,
             generated_bindegen_complex: Cell::new(false),
+            whitelisted: None,
+            codegen_items: None,
             used_template_parameters: None,
             need_bitfield_allocation: Default::default(),
             needs_mangling_hack: needs_mangling_hack,
+            cant_derive_debug: None,
+            have_vtable: None,
         };
 
         me.add_item(root_module, None, None);
@@ -751,12 +773,23 @@ impl<'ctx> BindgenContext<'ctx> {
             self.process_replacements();
         }
 
+        // And assert once again, because resolving type refs and processing
+        // replacements both mutate the IR graph.
+        self.assert_no_dangling_references();
+
+        // Compute the whitelisted set after processing replacements and
+        // resolving type refs, as those are the final mutations of the IR
+        // graph, and their completion means that the IR graph is now frozen.
+        self.compute_whitelisted_and_codegen_items();
+
         // Make sure to do this after processing replacements, since that messes
         // with the parentage and module children, and we want to assert that it
         // messes with them correctly.
         self.assert_every_item_in_a_module();
 
+        self.compute_has_vtable();
         self.find_used_template_parameters();
+        self.compute_cant_derive_debug();
 
         let ret = cb(self);
         self.gen_ctx = None;
@@ -822,6 +855,22 @@ impl<'ctx> BindgenContext<'ctx> {
         }
     }
 
+    /// Compute whether the type has vtable.
+    fn compute_has_vtable(&mut self) {
+        assert!(self.have_vtable.is_none());
+        self.have_vtable = Some(analyze::<HasVtableAnalysis>(self));
+    }
+
+    /// Look up whether the item with `id` has vtable or not.
+    pub fn lookup_item_id_has_vtable(&self, id: &ItemId) -> bool {
+        assert!(self.in_codegen_phase(),
+                "We only compute vtables when we enter codegen");
+
+        // Look up the computed value for whether the item with `id` has a
+        // vtable or not.
+        self.have_vtable.as_ref().unwrap().contains(id)
+    }
+
     fn find_used_template_parameters(&mut self) {
         if self.options.whitelist_recursively {
             let used_params = analyze::<UsedTemplateParameters>(self);
@@ -830,7 +879,7 @@ impl<'ctx> BindgenContext<'ctx> {
             // If you aren't recursively whitelisting, then we can't really make
             // any sense of template parameter usage, and you're on your own.
             let mut used_params = HashMap::new();
-            for id in self.whitelisted_items() {
+            for &id in self.whitelisted_items() {
                 used_params.entry(id)
                     .or_insert(id.self_template_params(self)
                         .map_or(Default::default(),
@@ -1366,7 +1415,13 @@ impl<'ctx> BindgenContext<'ctx> {
             _ => return None,
         };
 
-        let spelling = ty.spelling();
+        let mut spelling = ty.spelling();
+        // avoid the allocation if possible
+        if spelling.contains(' ') {
+            // These names are used in generated test names,
+            // they should be valid identifiers
+            spelling = spelling.replace(' ', "_");
+        }
         let is_const = ty.is_const();
         let layout = ty.fallible_layout().ok();
         let ty = Type::new(Some(spelling), layout, type_kind, is_const);
@@ -1560,77 +1615,125 @@ impl<'ctx> BindgenContext<'ctx> {
     ///
     /// If no items are explicitly whitelisted, then all items are considered
     /// whitelisted.
-    pub fn whitelisted_items<'me>(&'me self) -> WhitelistedItems<'me, 'ctx> {
+    pub fn whitelisted_items(&self) -> &ItemSet {
         assert!(self.in_codegen_phase());
         assert!(self.current_module == self.root_module);
 
-        let roots = self.items()
-            .filter(|&(_, item)| {
-                // If nothing is explicitly whitelisted, then everything is fair
-                // game.
-                if self.options().whitelisted_types.is_empty() &&
-                   self.options().whitelisted_functions.is_empty() &&
-                   self.options().whitelisted_vars.is_empty() {
-                    return true;
-                }
+        self.whitelisted.as_ref().unwrap()
+    }
 
-                // If this is a type that explicitly replaces another, we assume
-                // you know what you're doing.
-                if item.annotations().use_instead_of().is_some() {
-                    return true;
-                }
+    /// Get a reference to the set of items we should generate.
+    pub fn codegen_items(&self) -> &ItemSet {
+        assert!(self.in_codegen_phase());
+        assert!(self.current_module == self.root_module);
+        self.codegen_items.as_ref().unwrap()
+    }
 
-                let name = item.canonical_path(self)[1..].join("::");
-                debug!("whitelisted_items: testing {:?}", name);
-                match *item.kind() {
-                    ItemKind::Module(..) => true,
-                    ItemKind::Function(_) => {
-                        self.options().whitelisted_functions.matches(&name)
-                    }
-                    ItemKind::Var(_) => {
-                        self.options().whitelisted_vars.matches(&name)
-                    }
-                    ItemKind::Type(ref ty) => {
-                        if self.options().whitelisted_types.matches(&name) {
+    /// Compute the whitelisted items set and populate `self.whitelisted`.
+    fn compute_whitelisted_and_codegen_items(&mut self) {
+        assert!(self.in_codegen_phase());
+        assert!(self.current_module == self.root_module);
+        assert!(self.whitelisted.is_none());
+
+        let roots = {
+            let mut roots = self.items()
+                // Only consider roots that are enabled for codegen.
+                .filter(|&(_, item)| item.is_enabled_for_codegen(self))
+                .filter(|&(_, item)| {
+                    // If nothing is explicitly whitelisted, then everything is fair
+                    // game.
+                    if self.options().whitelisted_types.is_empty() &&
+                        self.options().whitelisted_functions.is_empty() &&
+                        self.options().whitelisted_vars.is_empty() {
                             return true;
                         }
 
-                        let parent = self.resolve_item(item.parent_id());
-                        if parent.is_module() {
-                            let mut prefix_path = parent.canonical_path(self);
+                    // If this is a type that explicitly replaces another, we assume
+                    // you know what you're doing.
+                    if item.annotations().use_instead_of().is_some() {
+                        return true;
+                    }
 
-                            // Unnamed top-level enums are special and we
-                            // whitelist them via the `whitelisted_vars` filter,
-                            // since they're effectively top-level constants,
-                            // and there's no way for them to be referenced
-                            // consistently.
-                            if let TypeKind::Enum(ref enum_) = *ty.kind() {
-                                if ty.name().is_none() &&
-                                   enum_.variants().iter().any(|variant| {
-                                    prefix_path.push(variant.name().into());
-                                    let name = prefix_path[1..].join("::");
-                                    prefix_path.pop().unwrap();
-                                    self.options()
-                                        .whitelisted_vars
-                                        .matches(&name)
-                                }) {
-                                    return true;
+                    let name = item.canonical_path(self)[1..].join("::");
+                    debug!("whitelisted_items: testing {:?}", name);
+                    match *item.kind() {
+                        ItemKind::Module(..) => true,
+                        ItemKind::Function(_) => {
+                            self.options().whitelisted_functions.matches(&name)
+                        }
+                        ItemKind::Var(_) => {
+                            self.options().whitelisted_vars.matches(&name)
+                        }
+                        ItemKind::Type(ref ty) => {
+                            if self.options().whitelisted_types.matches(&name) {
+                                return true;
+                            }
+
+                            let parent = self.resolve_item(item.parent_id());
+                            if parent.is_module() {
+                                let mut prefix_path = parent.canonical_path(self);
+
+                                // Unnamed top-level enums are special and we
+                                // whitelist them via the `whitelisted_vars` filter,
+                                // since they're effectively top-level constants,
+                                // and there's no way for them to be referenced
+                                // consistently.
+                                if let TypeKind::Enum(ref enum_) = *ty.kind() {
+                                    if ty.name().is_none() &&
+                                        enum_.variants().iter().any(|variant| {
+                                            prefix_path.push(variant.name().into());
+                                            let name = prefix_path[1..].join("::");
+                                            prefix_path.pop().unwrap();
+                                            self.options()
+                                                .whitelisted_vars
+                                                .matches(&name)
+                                        }) {
+                                            return true;
+                                        }
                                 }
                             }
+
+                            false
                         }
-
-                        false
                     }
-                }
-            })
-            .map(|(&id, _)| id);
+                })
+                .map(|(&id, _)| id)
+                .collect::<Vec<_>>();
 
-        // The reversal preserves the expected ordering of traversal, resulting
-        // in more stable-ish bindgen-generated names for anonymous types (like
-        // unions).
-        let mut roots: Vec<_> = roots.collect();
-        roots.reverse();
-        WhitelistedItems::new(self, roots)
+            // The reversal preserves the expected ordering of traversal,
+            // resulting in more stable-ish bindgen-generated names for
+            // anonymous types (like unions).
+            roots.reverse();
+            roots
+        };
+
+        let whitelisted_items_predicate =
+            if self.options().whitelist_recursively {
+                traversal::all_edges
+            } else {
+                traversal::no_edges
+            };
+
+        let whitelisted =
+            WhitelistedItemsTraversal::new(
+                self,
+                roots.clone(),
+                whitelisted_items_predicate,
+            ).collect::<ItemSet>();
+
+        let codegen_items =
+            if self.options().whitelist_recursively {
+                WhitelistedItemsTraversal::new(
+                    self,
+                    roots.clone(),
+                    traversal::codegen_edges,
+                ).collect::<ItemSet>()
+            } else {
+                whitelisted.clone()
+            };
+
+        self.whitelisted = Some(whitelisted);
+        self.codegen_items = Some(codegen_items);
     }
 
     /// Convenient method for getting the prefix to use for most traits in
@@ -1651,6 +1754,23 @@ impl<'ctx> BindgenContext<'ctx> {
     /// Whether we need to generate the binden complex type
     pub fn need_bindegen_complex_type(&self) -> bool {
         self.generated_bindegen_complex.get()
+    }
+
+    /// Compute whether we can derive debug.
+    fn compute_cant_derive_debug(&mut self) {
+        assert!(self.cant_derive_debug.is_none());
+        self.cant_derive_debug = Some(analyze::<CannotDeriveDebug>(self));
+    }
+
+    /// Look up whether the item with `id` can
+    /// derive debug or not.
+    pub fn lookup_item_id_can_derive_debug(&self, id: ItemId) -> bool {
+        assert!(self.in_codegen_phase(),
+                "We only compute can_derive_debug when we enter codegen");
+
+        // Look up the computed value for whether the item with `id` can
+        // derive debug or not.
+        !self.cant_derive_debug.as_ref().unwrap().contains(&id)
     }
 }
 
