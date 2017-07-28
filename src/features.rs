@@ -95,7 +95,9 @@ macro_rules! rust_feature_def {
                 }
             }
 
+            // TODO(tmfink) fix doc comment
             $(
+                /// Whether feature $feature is supported
                 pub fn $feature(&self) -> bool {
                     self.$feature
                 }
