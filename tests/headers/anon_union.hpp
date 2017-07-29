@@ -1,5 +1,3 @@
-// bindgen-flags: --rust-target 1.0
-
 template<typename T>
 struct TErrorResult {
   enum UnionState {

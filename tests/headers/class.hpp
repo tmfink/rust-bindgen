@@ -1,5 +1,3 @@
-// bindgen-flags: --rust-target 1.0
-
 class C {
     int a;
     // More than rust limits (32)
