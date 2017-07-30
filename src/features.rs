@@ -9,16 +9,17 @@ use std::io;
 /// Define RustTarget struct definition, Default impl, and conversions
 /// between RustTarget and String.
 macro_rules! rust_target_def {
-    ( $( $release:ident => $value:expr ),* ) => {
-        /// Represents the version of the Rust language to target
+    ( $( $release:ident => $value:expr => $attrs:meta; )* ) => {
+        /// Represents the version of the Rust language to target.
         ///
-        /// To support beta release X, find the corresponding stable release X
+        /// To support a beta release, use the corresponding stable release.
+        ///
+        /// This enum will have more variants added as necessary.
         #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Hash)]
         #[allow(non_camel_case_types)]
         pub enum RustTarget {
-            // TODO(tmfink) document each target
             $(
-                /// doc $release
+                #[$attrs]
                 $release,
             )*
         }
@@ -32,11 +33,11 @@ macro_rules! rust_target_def {
 
         impl RustTarget {
             #[allow(dead_code)]
-            /// Create a RustTarget from a string.
+            /// Create a `RustTarget` from a string.
             ///
-            /// The stable/beta versions of rust are of the form "1.0",
+            /// * The stable/beta versions of Rust are of the form "1.0",
             /// "1.19", etc.
-            /// The nightly version should be specified with "nightly".
+            /// * The nightly version should be specified with "nightly".
             pub fn from_str<'a>(s: &'a str) -> io::Result<RustTarget> {
                 match s.as_ref() {
                     $(
@@ -66,9 +67,9 @@ macro_rules! rust_target_def {
 }
 
 rust_target_def!(
-    Stable_1_0 => 1.0,
-    Stable_1_19 => 1.19,
-    Nightly => nightly
+    Stable_1_0 => 1.0 => doc="Rust stable 1.0";
+    Stable_1_19 => 1.19 => doc="Rust stable 1.19";
+    Nightly => nightly => doc="Nightly rust";
 );
 
 /// Latest stable release of Rust
@@ -76,7 +77,7 @@ pub const LATEST_STABLE_RUST: RustTarget = RustTarget::Stable_1_19;
 
 /// Create RustFeatures struct definition, new(), and a getter for each field
 macro_rules! rust_feature_def {
-    ( $( $feature:ident ),* ) => {
+    ( $( $feature:ident => $attrs:meta; )* ) => {
         /// Features supported by a rust target
         #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
         pub struct RustFeatures {
@@ -95,9 +96,8 @@ macro_rules! rust_feature_def {
                 }
             }
 
-            // TODO(tmfink) fix doc comment
             $(
-                /// Whether feature $feature is supported
+                #[$attrs]
                 pub fn $feature(&self) -> bool {
                     self.$feature
                 }
@@ -107,8 +107,8 @@ macro_rules! rust_feature_def {
 }
 
 rust_feature_def!(
-    untagged_union,
-    const_fn
+    untagged_union => doc="Untagged unions ([RFC 1444](https://github.com/rust-lang/rfcs/blob/master/text/1444-union.md))";
+    const_fn => doc="Constant function ([RFC 911](https://github.com/rust-lang/rfcs/blob/master/text/0911-const-fn.md))";
 );
 
 impl From<RustTarget> for RustFeatures {
