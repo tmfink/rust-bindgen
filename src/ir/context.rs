@@ -5,7 +5,8 @@ use super::int::IntKind;
 use super::item::{IsOpaque, Item, ItemAncestors, ItemCanonicalPath, ItemSet};
 use super::item_kind::ItemKind;
 use super::module::{Module, ModuleKind};
-use super::analysis::{analyze, UsedTemplateParameters, CannotDeriveDebug, HasVtableAnalysis};
+use super::analysis::{analyze, UsedTemplateParameters, CannotDeriveDebug, HasVtableAnalysis,
+                      CannotDeriveDefault};
 use super::template::{TemplateInstantiation, TemplateParameters};
 use super::traversal::{self, Edge, ItemTraversal};
 use super::ty::{FloatKind, Type, TypeKind};
@@ -40,18 +41,14 @@ impl ItemId {
 }
 
 impl CanDeriveDebug for ItemId {
-    type Extra = ();
-
-    fn can_derive_debug(&self, ctx: &BindgenContext, _: ()) -> bool {
-        ctx.resolve_item(*self).can_derive_debug(ctx, ())
+    fn can_derive_debug(&self, ctx: &BindgenContext) -> bool {
+        ctx.options().derive_debug && ctx.lookup_item_id_can_derive_debug(*self)
     }
 }
 
-impl<'a> CanDeriveDefault<'a> for ItemId {
-    type Extra = ();
-
-    fn can_derive_default(&self, ctx: &BindgenContext, _: ()) -> bool {
-        ctx.resolve_item(*self).can_derive_default(ctx, ())
+impl CanDeriveDefault for ItemId {
+    fn can_derive_default(&self, ctx: &BindgenContext) -> bool {
+        ctx.options().derive_default && ctx.lookup_item_id_can_derive_default(*self)
     }
 }
 
@@ -183,7 +180,13 @@ pub struct BindgenContext<'ctx> {
     ///
     /// This is populated when we enter codegen by `compute_can_derive_debug`
     /// and is always `None` before that and `Some` after.
-    cant_derive_debug: Option<HashSet<ItemId>>,
+    cannot_derive_debug: Option<HashSet<ItemId>>,
+
+    /// The set of (`ItemId`s of) types that can't derive default.
+    ///
+    /// This is populated when we enter codegen by `compute_can_derive_default`
+    /// and is always `None` before that and `Some` after.
+    cannot_derive_default: Option<HashSet<ItemId>>,
 
     /// The set of (`ItemId's of`) types that has vtable.
     ///
@@ -315,7 +318,8 @@ impl<'ctx> BindgenContext<'ctx> {
             used_template_parameters: None,
             need_bitfield_allocation: Default::default(),
             needs_mangling_hack: needs_mangling_hack,
-            cant_derive_debug: None,
+            cannot_derive_debug: None,
+            cannot_derive_default: None,
             have_vtable: None,
         };
 
@@ -789,7 +793,8 @@ impl<'ctx> BindgenContext<'ctx> {
 
         self.compute_has_vtable();
         self.find_used_template_parameters();
-        self.compute_cant_derive_debug();
+        self.compute_cannot_derive_debug();
+        self.compute_cannot_derive_default();
 
         let ret = cb(self);
         self.gen_ctx = None;
@@ -1757,9 +1762,9 @@ impl<'ctx> BindgenContext<'ctx> {
     }
 
     /// Compute whether we can derive debug.
-    fn compute_cant_derive_debug(&mut self) {
-        assert!(self.cant_derive_debug.is_none());
-        self.cant_derive_debug = Some(analyze::<CannotDeriveDebug>(self));
+    fn compute_cannot_derive_debug(&mut self) {
+        assert!(self.cannot_derive_debug.is_none());
+        self.cannot_derive_debug = Some(analyze::<CannotDeriveDebug>(self));
     }
 
     /// Look up whether the item with `id` can
@@ -1770,7 +1775,24 @@ impl<'ctx> BindgenContext<'ctx> {
 
         // Look up the computed value for whether the item with `id` can
         // derive debug or not.
-        !self.cant_derive_debug.as_ref().unwrap().contains(&id)
+        !self.cannot_derive_debug.as_ref().unwrap().contains(&id)
+    }
+
+    /// Compute whether we can derive default.
+    fn compute_cannot_derive_default(&mut self) {
+        assert!(self.cannot_derive_default.is_none());
+        self.cannot_derive_default = Some(analyze::<CannotDeriveDefault>(self));
+    }
+
+    /// Look up whether the item with `id` can
+    /// derive default or not.
+    pub fn lookup_item_id_can_derive_default(&self, id: ItemId) -> bool {
+        assert!(self.in_codegen_phase(),
+                "We only compute can_derive_default when we enter codegen");
+
+        // Look up the computed value for whether the item with `id` can
+        // derive default or not.
+        !self.cannot_derive_default.as_ref().unwrap().contains(&id)
     }
 }
 

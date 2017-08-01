@@ -271,30 +271,14 @@ impl Trace for Item {
 }
 
 impl CanDeriveDebug for Item {
-    type Extra = ();
-
-    fn can_derive_debug(&self, ctx: &BindgenContext, _: ()) -> bool {
+    fn can_derive_debug(&self, ctx: &BindgenContext) -> bool {
         ctx.options().derive_debug && ctx.lookup_item_id_can_derive_debug(self.id())
     }
 }
 
-impl<'a> CanDeriveDefault<'a> for Item {
-    type Extra = ();
-
-    fn can_derive_default(&self, ctx: &BindgenContext, _: ()) -> bool {
-        ctx.options().derive_default &&
-        match self.kind {
-            ItemKind::Type(ref ty) => {
-                if self.is_opaque(ctx, &()) {
-                    ty.layout(ctx)
-                        .map_or(false,
-                                |l| l.opaque().can_derive_default(ctx, ()))
-                } else {
-                    ty.can_derive_default(ctx, self)
-                }
-            }
-            _ => false,
-        }
+impl CanDeriveDefault for Item {
+    fn can_derive_default(&self, ctx: &BindgenContext) -> bool {
+        ctx.options().derive_default && ctx.lookup_item_id_can_derive_default(self.id())
     }
 }
 
@@ -395,9 +379,8 @@ pub struct Item {
     parent_id: ItemId,
     /// The item kind.
     kind: ItemKind,
-    /// Detect cycles when determining if we can derive debug/copy or not, and
+    /// Detect cycles when determining if we can derive copy or not, and
     /// avoid infinite recursion.
-    detect_derive_debug_cycle: Cell<bool>,
     detect_derive_copy_cycle: Cell<bool>,
 }
 
@@ -425,7 +408,6 @@ impl Item {
             comment: comment,
             annotations: annotations.unwrap_or_default(),
             kind: kind,
-            detect_derive_debug_cycle: Cell::new(false),
             detect_derive_copy_cycle: Cell::new(false),
         }
     }
@@ -744,12 +726,21 @@ impl Item {
             ItemKind::Type(ref ty) => {
                 let name = match *ty.kind() {
                     TypeKind::ResolvedTypeRef(..) => panic!("should have resolved this in name_target()"),
-                    _ => ty.name(),
+                    TypeKind::Pointer(inner) => {
+                        ctx.resolve_item(inner)
+                           .expect_type().name()
+                           .map(|name| format!("ptr_{}", name))
+                    }
+                    TypeKind::Array(inner, length) => {
+                        ctx.resolve_item(inner)
+                           .expect_type().name()
+                           .map(|name| format!("array_{}_{}", name, length))
+                    }
+                    _ => ty.name().map(ToOwned::to_owned)
                 };
-                name.map(ToOwned::to_owned)
-                    .unwrap_or_else(|| {
-                        format!("_bindgen_ty_{}", self.exposed_id(ctx))
-                    })
+                name.unwrap_or_else(|| {
+                    format!("_bindgen_ty_{}", self.exposed_id(ctx))
+                })
             }
             ItemKind::Function(ref fun) => {
                 let mut name = fun.name().to_owned();
@@ -949,17 +940,13 @@ impl IsOpaque for Item {
 }
 
 impl HasVtable for ItemId {
-    type Extra = ();
-
-    fn has_vtable(&self, ctx: &BindgenContext, _: &()) -> bool {
+    fn has_vtable(&self, ctx: &BindgenContext) -> bool {
         ctx.lookup_item_id_has_vtable(self)
     }
 }
 
 impl HasVtable for Item {
-    type Extra = ();
-
-    fn has_vtable(&self, ctx: &BindgenContext, _: &()) -> bool {
+    fn has_vtable(&self, ctx: &BindgenContext) -> bool {
         ctx.lookup_item_id_has_vtable(&self.id())
     }
 }
