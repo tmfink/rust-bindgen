@@ -5,6 +5,7 @@
 
 
 #[repr(C)]
+#[derive(Copy)]
 pub union WithBigArray {
     pub a: ::std::os::raw::c_int,
     pub b: [::std::os::raw::c_int; 33usize],
@@ -26,10 +27,14 @@ fn bindgen_test_layout_WithBigArray() {
                 "Alignment of field: " , stringify ! ( WithBigArray ) , "::" ,
                 stringify ! ( b ) ));
 }
+impl Clone for WithBigArray {
+    fn clone(&self) -> Self { *self }
+}
 impl Default for WithBigArray {
     fn default() -> Self { unsafe { ::std::mem::zeroed() } }
 }
 #[repr(C)]
+#[derive(Copy)]
 pub union WithBigArray2 {
     pub a: ::std::os::raw::c_int,
     pub b: [::std::os::raw::c_char; 33usize],
@@ -51,10 +56,14 @@ fn bindgen_test_layout_WithBigArray2() {
                 "Alignment of field: " , stringify ! ( WithBigArray2 ) , "::"
                 , stringify ! ( b ) ));
 }
+impl Clone for WithBigArray2 {
+    fn clone(&self) -> Self { *self }
+}
 impl Default for WithBigArray2 {
     fn default() -> Self { unsafe { ::std::mem::zeroed() } }
 }
 #[repr(C)]
+#[derive(Copy)]
 pub union WithBigMember {
     pub a: ::std::os::raw::c_int,
     pub b: WithBigArray,
@@ -75,6 +84,9 @@ fn bindgen_test_layout_WithBigMember() {
                 usize } , 0usize , concat ! (
                 "Alignment of field: " , stringify ! ( WithBigMember ) , "::"
                 , stringify ! ( b ) ));
+}
+impl Clone for WithBigMember {
+    fn clone(&self) -> Self { *self }
 }
 impl Default for WithBigMember {
     fn default() -> Self { unsafe { ::std::mem::zeroed() } }
