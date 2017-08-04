@@ -1,7 +1,9 @@
-use bindgen::{Builder, CodegenConfig, RustTarget, builder};
+use bindgen::{Builder, CodegenConfig, RUST_TARGET_STRINGS, RustTarget, builder};
 use clap::{App, Arg};
+// use super::features::RUST_TARGET_STRINGS;
 use std::fs::File;
 use std::io::{self, Error, ErrorKind};
+use std::str::FromStr;
 
 /// Construct a new [`Builder`](./struct.Builder.html) from command line flags.
 pub fn builder_from_flags<I>
@@ -9,6 +11,10 @@ pub fn builder_from_flags<I>
      -> Result<(Builder, Box<io::Write>, bool), io::Error>
     where I: Iterator<Item = String>,
 {
+    let rust_target_help = format!(
+        "Version of the Rust compiler to target. Valid options are: {:?}.",
+        RUST_TARGET_STRINGS);
+
     let matches = App::new("bindgen")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Generates Rust bindings from C/C++ headers.")
@@ -163,7 +169,7 @@ pub fn builder_from_flags<I>
                 .number_of_values(1),
             Arg::with_name("rust-target")
                 .long("rust-target")
-                .help("Version of the Rust compiler to target.")
+                .help(&rust_target_help)
                 .takes_value(true),
             Arg::with_name("static")
                 .long("static-link")

@@ -82,7 +82,7 @@ mod codegen {
     include!(concat!(env!("OUT_DIR"), "/codegen.rs"));
 }
 
-pub use features::{RustTarget, LATEST_STABLE_RUST};
+pub use features::{RustTarget, LATEST_STABLE_RUST, RUST_TARGET_STRINGS};
 use features::RustFeatures;
 use ir::context::{BindgenContext, ItemId};
 use ir::item::Item;
