@@ -37,7 +37,6 @@ macro_rules! rust_target_def {
         impl FromStr for RustTarget {
             type Err = io::Error;
 
-            #[allow(dead_code)]
             /// Create a `RustTarget` from a string.
             ///
             /// * The stable/beta versions of Rust are of the form "1.0",
@@ -75,7 +74,6 @@ macro_rules! rust_target_def {
 macro_rules! rust_target_values_def {
     ( $( $( #[$attr:meta] )* => $release:ident => $value:expr; )* ) => {
         /// Strings of allowed `RustTarget` values
-        #[allow(dead_code)]
         pub static RUST_TARGET_STRINGS: &'static [&str] = &[
             $(
                 stringify!($value),
